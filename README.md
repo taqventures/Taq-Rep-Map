@@ -5,8 +5,8 @@ Sales territory map for central Alberta, from Red Deer north to just south of Gr
 ## How it works
 
 - `public/index.html` is the whole app: map, controls and postal-code boundaries (Statistics Canada 2021 FSA boundary file, simplified and embedded).
-- Postal codes over 1,000 km² (T0A, T0B, T0C, T0E, T0G, T0H, T7E, T7S and others) are split into Alberta Township System blocks (Twp-Rge-W4/W5/W6). The grid is calculated, so lines can sit a few hundred metres off the surveyed roads.
-- Claim one area by clicking, many by holding Shift and dragging, or a whole rectangle with the Box tool (hold Alt to release).
+- Rural postal codes (T0A, T0B, T0C, T0E, T0G, T0H, T0M…) are split into their full postal codes, one area per community (e.g. T0E 1N0 Mayerthorpe), drawn around GeoNames postal code locations and trimmed to the StatCan FSA boundary. The lines between full codes inside a rural FSA are approximate.
+- Claim one area by clicking, many by holding Shift and dragging, or a whole rectangle with the Box tool (hold Alt to release). "Claim all of T0E" on an area's card takes the whole rural code.
 - `netlify/functions/data.mjs` stores teams, reps and claims in Netlify Blobs and serves them at `/api/data`.
 - Netlify Identity handles sign-in. Any signed-in user can view. Only users with the `manager` (or `admin`) role can make changes; the function enforces this, not just the page.
 - Open pages refresh every 15 seconds and whenever the tab comes back into focus.
@@ -40,4 +40,4 @@ Use **Download CSV** in the app for a spreadsheet copy of every claim.
 
 ## Updating the boundaries
 
-The map data is embedded in `public/index.html` as `<script type="application/json" id="fsa-data">`. Area keys are FSA codes (`T5S`) or, for split rural codes, `FSA-<sub-area>` (`T0E-4813012`).
+The map data is embedded in `public/index.html` as `<script type="application/json" id="fsa-data">`. Area keys are FSA codes (`T5S`) or, for rural full codes, `FSA-<code>` (`T0E-0A2`). Postal code locations: GeoNames (CC BY 4.0).
