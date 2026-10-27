@@ -2,7 +2,10 @@
 // GET  /api/data  → whole state (any signed-in user)
 // POST /api/data  → one change (users with the "manager" or "admin" Identity role,
 //                    or whose email is listed in the MANAGER_EMAILS environment variable)
-import { getStore, connectLambda } from "@netlify/blobs";
+import { getStore } from "@netlify/blobs";
+import { getUser } from "@netlify/identity";
+
+export const config = { path: "/api/data" };
 
 const KEY = "state";
 const DIVS = ["classic", "resources", "solutions"];
@@ -12,11 +15,8 @@ const COLOR = /^#[0-9A-Fa-f]{6}$/;
 const LIMITS = { teams: 200, reps: 1000 };
 
 const empty = () => ({ teams: {}, reps: {}, claims: { classic: {}, resources: {}, solutions: {} } });
-const reply = (body, status = 200) => ({
-  statusCode: status,
-  headers: { "content-type": "application/json", "cache-control": "no-store" },
-  body: JSON.stringify(body),
-});
+const reply = (body, status = 200) =>
+  new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json", "cache-control": "no-store" } });
 const name = (v) => (typeof v === "string" ? v.trim().slice(0, 40) : "");
 
 function apply(state, b) {
@@ -68,37 +68,45 @@ function apply(state, b) {
   }
 }
 
-export const handler = async (event, context) => {
-  connectLambda(event);
-  const user = context.clientContext && context.clientContext.user;
+export default async (req) => {
+  let user = null;
+  try { user = await getUser(); } catch { user = null; }
   if (!user) return reply({ error: "Sign in required." }, 401);
-  const roles = ((user.app_metadata && user.app_metadata.roles) || []).map((r) => String(r).toLowerCase());
+  const rawRoles = user.roles || (user.app_metadata && user.app_metadata.roles) || (user.appMetadata && user.appMetadata.roles) || [];
+  const roles = rawRoles.map((r) => String(r).toLowerCase());
   const email = String(user.email || "").toLowerCase();
   const managerEmails = String(process.env.MANAGER_EMAILS || "").toLowerCase().split(/[\s,;]+/).filter(Boolean);
   const canEdit = roles.includes("manager") || roles.includes("admin") || (email && managerEmails.includes(email));
   const me = { email, canEdit };
-  const store = getStore({ name: "rep-map", consistency: "strong" });
 
-  if (event.httpMethod === "GET") {
-    return reply({ ...((await store.get(KEY, { type: "json" })) || empty()), me });
+  try {
+    const store = getStore({ name: "rep-map", consistency: "strong" });
+
+    if (req.method === "GET") {
+      return reply({ ...((await store.get(KEY, { type: "json" })) || empty()), me });
+    }
+    if (req.method !== "POST") return reply({ error: "Method not allowed." }, 405);
+    if (!canEdit) return reply({ error: "Only managers can change territories." }, 403);
+
+    const text = await req.text();
+    if (text.length > 100_000) return reply({ error: "Request too large." }, 413);
+    let body;
+    try { body = JSON.parse(text || "{}"); } catch { return reply({ error: "Bad request." }, 400); }
+
+    // Read–modify–write with an etag check so two managers editing at once don't overwrite each other.
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const cur = await store.getWithMetadata(KEY, { type: "json" });
+      const state = (cur && cur.data) || empty();
+      const err = apply(state, body);
+      if (err) return reply({ error: err }, 400);
+      const opts = cur && cur.etag ? { onlyIfMatch: cur.etag } : { onlyIfNew: true };
+      const res = await store.setJSON(KEY, state, opts);
+      if (res && res.modified === false) continue;   // someone else saved first; retry on fresh data
+      return reply({ ...state, me });
+    }
+    return reply({ error: "The map is busy. Try again in a moment." }, 409);
+  } catch (e) {
+    console.error("rep-map data error:", e && e.stack || e);
+    return reply({ error: "The territory store isn't responding. Try again shortly." }, 500);
   }
-  if (event.httpMethod !== "POST") return reply({ error: "Method not allowed." }, 405);
-  if (!canEdit) return reply({ error: "Only managers can change territories." }, 403);
-  if ((event.body || "").length > 100_000) return reply({ error: "Request too large." }, 413);
-
-  let body;
-  try { body = JSON.parse(event.body || "{}"); } catch { return reply({ error: "Bad request." }, 400); }
-
-  // Read–modify–write with an etag check so two managers editing at once don't overwrite each other.
-  for (let attempt = 0; attempt < 5; attempt++) {
-    const cur = await store.getWithMetadata(KEY, { type: "json" });
-    const state = (cur && cur.data) || empty();
-    const err = apply(state, body);
-    if (err) return reply({ error: err }, 400);
-    const opts = cur && cur.etag ? { onlyIfMatch: cur.etag } : { onlyIfNew: true };
-    const res = await store.setJSON(KEY, state, opts);
-    if (res && res.modified === false) continue;   // someone else saved first; retry on fresh data
-    return reply({ ...state, me });
-  }
-  return reply({ error: "The map is busy. Try again in a moment." }, 409);
 };

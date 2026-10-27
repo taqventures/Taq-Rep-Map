@@ -5,6 +5,7 @@
   "description": "Sales territory map for central Alberta postal codes (FSAs), with Classic, Resources and Solutions division layers.",
   "type": "module",
   "dependencies": {
-    "@netlify/blobs": "^8.1.0"
+    "@netlify/blobs": "latest",
+    "@netlify/identity": "latest"
   }
 }

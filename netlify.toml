@@ -5,11 +5,6 @@
 [functions]
   node_bundler = "esbuild"
 
-[[redirects]]
-  from = "/api/data"
-  to = "/.netlify/functions/data"
-  status = 200
-
 [[headers]]
   for = "/*"
   [headers.values]
