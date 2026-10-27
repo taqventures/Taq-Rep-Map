@@ -1,6 +1,7 @@
 // Rep Map Alberta — shared territory store.
 // GET  /api/data  → whole state (any signed-in user)
-// POST /api/data  → one change (users with the "manager" or "admin" Identity role)
+// POST /api/data  → one change (users with the "manager" or "admin" Identity role,
+//                    or whose email is listed in the MANAGER_EMAILS environment variable)
 import { getStore, connectLambda } from "@netlify/blobs";
 
 const KEY = "state";
@@ -71,14 +72,18 @@ export const handler = async (event, context) => {
   connectLambda(event);
   const user = context.clientContext && context.clientContext.user;
   if (!user) return reply({ error: "Sign in required." }, 401);
-  const roles = (user.app_metadata && user.app_metadata.roles) || [];
+  const roles = ((user.app_metadata && user.app_metadata.roles) || []).map((r) => String(r).toLowerCase());
+  const email = String(user.email || "").toLowerCase();
+  const managerEmails = String(process.env.MANAGER_EMAILS || "").toLowerCase().split(/[\s,;]+/).filter(Boolean);
+  const canEdit = roles.includes("manager") || roles.includes("admin") || (email && managerEmails.includes(email));
+  const me = { email, canEdit };
   const store = getStore({ name: "rep-map", consistency: "strong" });
 
   if (event.httpMethod === "GET") {
-    return reply((await store.get(KEY, { type: "json" })) || empty());
+    return reply({ ...((await store.get(KEY, { type: "json" })) || empty()), me });
   }
   if (event.httpMethod !== "POST") return reply({ error: "Method not allowed." }, 405);
-  if (!roles.includes("manager") && !roles.includes("admin")) return reply({ error: "Only managers can change territories." }, 403);
+  if (!canEdit) return reply({ error: "Only managers can change territories." }, 403);
   if ((event.body || "").length > 100_000) return reply({ error: "Request too large." }, 413);
 
   let body;
@@ -93,7 +98,7 @@ export const handler = async (event, context) => {
     const opts = cur && cur.etag ? { onlyIfMatch: cur.etag } : { onlyIfNew: true };
     const res = await store.setJSON(KEY, state, opts);
     if (res && res.modified === false) continue;   // someone else saved first; retry on fresh data
-    return reply(state);
+    return reply({ ...state, me });
   }
   return reply({ error: "The map is busy. Try again in a moment." }, 409);
 };

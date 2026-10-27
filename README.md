@@ -10,6 +10,7 @@ Sales territory map for central Alberta, from Red Deer north to just south of Gr
 - `netlify/functions/data.mjs` stores teams, reps and claims in Netlify Blobs and serves them at `/api/data`.
 - Netlify Identity handles sign-in. Any signed-in user can view. Only users with the `manager` (or `admin`) role can make changes; the function enforces this, not just the page.
 - Open pages refresh every 15 seconds and whenever the tab comes back into focus.
+- The map uses Web Mercator, the same projection as Google Maps, with a live scale bar.
 
 ## Netlify setup (one time)
 
@@ -17,7 +18,10 @@ Sales territory map for central Alberta, from Red Deer north to just south of Gr
 2. **Project configuration → Identity → Enable Identity.**
 3. Under Identity **Registration**, set it to **Invite only** so strangers can't sign up.
 4. **Invite users** from the Identity tab (yourself first).
-5. For each manager, open their user in the Identity tab, edit **Roles**, and add `manager`. Reps get no role and can view only.
+5. Give managers edit access, either way works:
+   - In the Identity tab, open the user, edit **Roles** and add `manager`, or
+   - In **Project configuration → Environment variables**, add `MANAGER_EMAILS` with a comma-separated list (e.g. `tanner@taqventures.com, someone@herc.com`), then redeploy.
+   Everyone else can view only. After a role change, the person signs out and back in.
 6. Sign in on the site. The first change you make creates the data store.
 
 ## Data
