@@ -171,6 +171,7 @@ select,.inp{border:1px solid var(--line);border-radius:8px;background:var(--pane
 .gate-card{background:var(--panel);border:1px solid var(--line);border-top:3px solid var(--accent);border-radius:12px;box-shadow:var(--shadow);padding:28px;max-width:380px;display:flex;flex-direction:column;gap:12px}
 .gate-card h2{margin:0;font-family:var(--f-display);font-weight:600;font-size:26px}
 .gate-card p{margin:0;color:var(--muted);line-height:1.5}
+.gate-card .gate-msg{color:var(--danger);font-size:13px}
 @media (max-width:860px){
   body{overflow:auto}
   .shell{height:auto;min-height:100%}
@@ -261,6 +262,7 @@ select,.inp{border:1px solid var(--line);border-radius:8px;background:var(--pane
   <div class="gate-card">
     <h2>Rep Map Alberta</h2>
     <p>Sign in to see sales territories. Managers can claim and release postal codes; everyone else can view.</p>
+    <p class="gate-msg" id="gateMsg" hidden></p>
     <button class="btn primary" id="gateBtn">Sign in</button>
   </div>
 </div>
@@ -476,9 +478,17 @@ async function api(method, body){
   if (!res.ok){ const err = new Error((data && data.error) || ("HTTP "+res.status)); err.status = res.status; throw err; }
   return data;
 }
-async function apiLoad(){ if (!store.user) return; try { const st = await api("GET"); if (!Object.values(flushing).some(Boolean)) applyState(st); } catch(e){ if (e.status===401) { store.user=null; showGate(); } } }
+async function apiLoad(){
+  if (!store.user) return;
+  try { const st = await api("GET"); if (!Object.values(flushing).some(Boolean)) applyState(st); }
+  catch(e){
+    if (e.status===401) { store.user=null; showGate("You're signed in, but the server didn't accept the session. Sign out and sign in again."); }
+    else toast("Couldn't load territories: " + (e.message || "network error"));
+  }
+}
 function apiStart(user){
-  if (store.user && store.user.id === user.id) return;
+  document.getElementById("gate").hidden = true;
+  if (store.user && store.user.id === user.id){ setSync(); return; }
   store.user = user; store.kind = "api";
   const roles = (user.app_metadata && user.app_metadata.roles) || [];
   S.readonly = !(roles.includes("manager") || roles.includes("admin"));
@@ -486,15 +496,23 @@ function apiStart(user){
   setSync(); apiLoad();
   clearInterval(pollT); pollT = setInterval(() => { if (document.visibilityState==="visible") apiLoad(); }, 15000);
 }
-function showGate(){ clearInterval(pollT); store.kind="api"; setSync(); document.getElementById("gate").hidden = false; }
+function showGate(msg){
+  clearInterval(pollT); store.kind="api"; setSync();
+  const m = document.getElementById("gateMsg"); if (m) { m.textContent = msg || ""; m.hidden = !msg; }
+  document.getElementById("gate").hidden = false;
+}
 function initNetlify(){
   const id = window.netlifyIdentity; store.kind = "api"; setSync();
-  id.on("init", u => u ? apiStart(u) : showGate());
-  id.on("login", u => { id.close(); apiStart(u); });
+  let started = false;
+  // The widget can fire "init" more than once (it starts itself on page load). Always act on who is signed in right now.
+  const sync = () => { const u = id.currentUser(); if (u) apiStart(u); else if (!store.user) showGate(); };
+  id.on("init", () => { started = true; sync(); });
+  id.on("login", u => { try { id.close(); } catch(e){} apiStart(u); });
   id.on("logout", () => { store.user = null; S.teams={}; S.reps={}; DIVS.forEach(v=>{ serverClaims[v.id]={}; pending[v.id]={}; recomputeClaims(v.id); }); renderAll(); showGate(); });
   document.getElementById("gateBtn").onclick = () => id.open("login");
   document.getElementById("signout").onclick = () => id.logout();
-  const u = id.currentUser(); if (u) apiStart(u); else id.init();
+  const u = id.currentUser(); if (u) apiStart(u);
+  window.addEventListener("load", () => setTimeout(() => { if (!started) id.init(); else sync(); }, 50));
   document.addEventListener("visibilitychange", () => { if (document.visibilityState==="visible") apiLoad(); });
 }
 async function apiWrite(body){
